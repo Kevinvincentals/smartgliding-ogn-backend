@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  smartgliding-ogn-backend:
+    build: .
+    container_name: smartlist-ogn-backend
+    ports:
+      - "8765:8765"
+    volumes:
+      - data-volume:/data
+      - events-volume:/events
+    depends_on:
+      - mongodb
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  data-volume:
+  mongo-data:
+  events-volume: 

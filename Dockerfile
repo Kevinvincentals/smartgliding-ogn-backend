@@ -18,7 +18,6 @@ VOLUME /events
 
 # Set basic environment variables
 ENV PYTHONUNBUFFERED=1
-ENV EVENTS_FILE=/events/flight_events.json
 ENV AIRFIELDS_FILE=/app/dk_airfields.json
 
 # Expose the WebSocket port

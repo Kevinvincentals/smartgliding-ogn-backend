@@ -9,24 +9,12 @@ services:
     volumes:
       - data-volume:/data
       - events-volume:/events
-    depends_on:
-      - mongodb
-    env_file:
-      - .env
-    restart: unless-stopped
-
-  mongodb:
-    image: mongo:latest
-    container_name: mongodb
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo-data:/data/db
-    env_file:
-      - .env
+    environment:
+      - DATABASE_URL=sample
+      - WEBHOOK_URL=http://dev.ekfs.dk/api/webhooks/flights
+      - WEBHOOK_API_KEY=secret
+      - WEBHOOK_ENABLED=false
     restart: unless-stopped
 
 volumes:
   data-volume:
-  mongo-data:
-  events-volume: 

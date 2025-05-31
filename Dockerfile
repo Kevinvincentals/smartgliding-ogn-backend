@@ -12,9 +12,8 @@ COPY services/ ./services/
 COPY dk_airfields.json .
 
 # Create directories for data storage
-RUN mkdir -p /data /events
+RUN mkdir -p /data
 VOLUME /data
-VOLUME /events
 
 # Set basic environment variables
 ENV PYTHONUNBUFFERED=1

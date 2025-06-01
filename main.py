@@ -22,7 +22,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 # Get logger
-logger = logging.getLogger("plane-tracker")
+logger = logging.getLogger("SmartGliding")
 
 
 def signal_handler(sig, frame):

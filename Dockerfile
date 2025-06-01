@@ -2,22 +2,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy requirements first to leverage Docker cache
+# Copy requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application code
 COPY main.py .
 COPY services/ ./services/
-COPY dk_airfields.json .
 
-# Create directories for data storage
-RUN mkdir -p /data
-VOLUME /data
 
 # Set basic environment variables
 ENV PYTHONUNBUFFERED=1
-ENV AIRFIELDS_FILE=/app/dk_airfields.json
 
 # Expose the WebSocket port
 EXPOSE 8765

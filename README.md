@@ -1,198 +1,156 @@
-# Plane Tracker
+# SmartGliding OGN Backend
 
-A WebSocket relay server for aircraft tracking data from the Open Glider Network (OGN).
+## 🇩🇰 Dansk
 
-## Code Structure
+### Hvad er dette?
 
-The application has been modularized into the following components:
+SmartGliding OGN Backend er en tjeneste der fungere sammen med SmartGliding web applikationen, der automatisk sporer svævefly og andre luftfartøjer i Danmark i realtid. Systemet kan automatisk registrere:
 
-### `main.py`
-The entry point for the application that initializes all services and handles signals.
+- **🛫 Start** - Når et fly letter fra en flyveplads
+- **🛬 Landing** - Når et fly lander på en flyveplads  
+- **🪂 Start-type** - Om det er spilstart eller slæb
+- **📍 Position** - Kontinuerlig GPS-tracking af fly i luften
 
-### `services/` Directory
+### Hvorfor er dette nødvendigt?
 
-#### `config.py`
-Contains all configuration settings for the application:
-- MongoDB connection settings
-- Geographic regions (Denmark and Frankfurt)
-- FLARM database settings
-- WebSocket server settings 
-- Caching parameters
+Mange svæveflyverklubber har brug for at:
+- Automatisk logge starter og landinger i deres flyvebøger
+- Overvåge flyaktivitet på deres flyveplads i realtid
+- Se hvor klubbens fly befinder sig på et live-kort
+- Få automatisk besked når fly starter eller lander
 
-#### `db.py`
-Database operations including:
-- MongoDB connection handling
-- Club plane caching (updated every 30 minutes)
-- Aircraft position storage
-- Flight tracking functionality
 
-#### `flarm_database.py`
-Handles FLARM device database operations:
-- Downloading device information from ddb.glidernet.org
-- Parsing and storing device data
-- Lookup functionality for device details
+## 🇬🇧 English
 
-#### `flight_events.py`
-Detects and logs takeoffs and landings:
-- Tracks aircraft state changes
-- Identifies when aircraft take off or land
-- Detects tow plane takeoffs with gliders
-- Logs events to a JSON file
+### What is this?
 
-#### `ogn_client.py`
-Processes data from the Open Glider Network:
-- Connects to OGN's APRS servers
-- Processes incoming aircraft beacons
-- Updates aircraft data
-- Cleans up stale aircraft data
-- Triggers flight event detection
+SmartGliding OGN Backend is a service that automatically tracks gliders and other aircraft in Denmark in real-time. The system can automatically detect:
 
-#### `websocket_server.py`
-Manages WebSocket connections:
-- Client connection handling
-- Broadcasting updates to connected clients
-- Handling track requests
-- Processing update queues
+- **🛫 Takeoffs** - When an aircraft departs from an airfield
+- **🛬 Landings** - When an aircraft lands at an airfield
+- **🪂 Launch types** - Whether it's winch launch or aerotow
+- **📍 Position** - Continuous GPS tracking of aircraft in flight
 
-#### `models.py`
-Contains data models and serialization:
-- JSON encoding for datetime objects
-- Helper functions for serializing MongoDB data
+### Why is this needed?
 
-#### `utils.py`
-Utility functions:
-- Aircraft type detection from APRS symbols
-- Geographic distance calculations
-- Logging configuration
+Many gliding clubs need to:
+- Automatically log takeoffs and landings in their flight logbooks
+- Monitor flight activity at their airfield in real-time
+- See where club aircraft are located on a live map
+- Get automatic notifications when aircraft take off or land
 
-## Configuration
+Previously, all of this had to be done manually, which was time-consuming and error-prone. This system automates the entire process by listening to FLARM signals from the Open Glider Network (OGN).
 
-### Environment Variables
+## 🏗️ Technical Architecture
 
-The application uses the following environment variables:
+### Core Components
 
-- `DATABASE_URL`: MongoDB connection string (**required**)
-- `FLARM_DB_FILE`: Location of the FLARM database file (default: "flarm-database.csv")
-- `EVENTS_FILE`: Location of the flight events JSON file (default: "flight_events.json")
-- `MONGO_INITDB_DATABASE`: MongoDB initial database name (for Docker setup)
+- **OGN Client** - Connects to Open Glider Network for FLARM data
+- **ADSB Client** - Fetches additional aircraft data from ADSB.lol API
+- **Flight Event Detection** - Intelligent takeoff/landing detection
+- **WebSocket Server** - Real-time data streaming to clients
+- **MongoDB Integration** - Data storage and caching
+- **Cache Management** - Efficient club planes and airfield caching
 
-### Geographic Regions
+### Data Sources
 
-The application monitors aircraft in two regions:
+1. **Open Glider Network (OGN)** - Primary source for FLARM-equipped aircraft
+2. **ADSB.lol API** - Secondary source for transponder-equipped aircraft
+3. **Danish Airfields Database** - Automated fetching from external API
+4. **OGN Device Database** - Aircraft registration and model information
 
-1. **Denmark:**
-   - Center: 55.923624, 9.755859
-   - Radius: 195 km
+### Event Detection
 
-2. **Frankfurt:**
-   - Center: 50.110980, 8.664145  
-   - Radius: 120 km
+The system intelligently detects:
+- **Takeoffs**: Speed > 30 km/h AND altitude > 20m
+- **Landings**: Speed < 40 km/h AND altitude < 100m
+- **Launch Types**: 
+  - Winch launch (single aircraft)
+  - Aerotow (glider + tow plane detected together)
+- **Airfield Association**: Automatic nearest airfield detection
 
-These are configured in `services/config.py` and can be modified if needed.
+## 🚀 Features
 
-### Flight Events Detection
+### Real-time Tracking
+- Live aircraft positions via WebSocket
+- Automatic aircraft state management
+- Client connection monitoring
+- Data cleanup for inactive aircraft
 
-The application detects and logs the following events:
+### Smart Filtering
+- **Club Aircraft Only**: Only stores data for registered club planes
+- **Registered Airfields**: Only logs events at registered club airfields
+- **Geographic Filtering**: Currently hardcoded for Denmark region
+- **Speed Filtering**: Ignores stationary aircraft
 
-- **Takeoffs**: When an aircraft reaches a speed of 30 km/h and altitude of 40m
-- **Landings**: When an aircraft drops below 30 km/h and altitude of 100m
-- **Tow Takeoffs**: When a glider and tow plane take off in close proximity
+### Performance Optimization
+- **Batch Database Operations**: Efficient bulk inserts/updates
+- **Smart Caching**: 30-minute refresh cycle for all caches
+- **Progress Bars**: Visual feedback during data imports
+- **Background Processing**: Non-blocking cache updates
 
-Events are stored in a JSON file with the following format:
-```json
-{
-  "type": "takeoff|landing|tow_takeoff",
-  "origin": "fsk-flarm-tracker",
-  "airfield": "UNKNOWN",
-  "id": "FLRXXXXXX",
-  "aircraft_type": "Glider",
-  "aircraft_model": "ASK 21",
-  "registration": "OY-XYZ",
-  "timestamp": "2023-05-08T09:29:45.282915Z"
-}
+### Integration Capabilities
+- **WebSocket API**: Real-time data streaming
+- **MongoDB Storage**: Scalable data persistence
+- **Webhook Support**: External system notifications
+- **RESTful Patterns**: Standard data access patterns
+
+## ⚙️ Configuration
+
+### Geographic Region (Currently Hardcoded)
+
+```python
+# Denmark configuration
+DENMARK_CENTER_LAT = 55.923624
+DENMARK_CENTER_LON = 9.755859
+DENMARK_RADIUS_KM = 195
 ```
 
-### Caching
+*Note: Geographic filtering is currently hardcoded for Denmark. Future versions will make this configurable.*
 
-- Club plane information is cached and refreshed every 30 minutes
-- Aircraft are removed from active tracking after 5 minutes of inactivity
 
-### WebSocket Server
+### Database Collections
 
-- Listens on: 0.0.0.0:8765
-- Sends heartbeat messages every 5 seconds
-- Provides real-time aircraft updates and responds to track requests
+- `flarm_data` - Aircraft position data
+- `flight_events` - Takeoff/landing events
+- `planes` - Club aircraft registry
+- `clubs` - Club information and homefields
+- `dk_airfields` - Danish airfields database
+- `ogn-database` - OGN device registry
 
-## Docker Setup
+## 📡 WebSocket API
 
-### Prerequisites
-
-- Docker
-- Docker Compose
-
-### Environment Setup
-
-1. Copy the example environment file:
-```bash
-cp .env.example .env
-```
-
-2. Edit the `.env` file to set your environment variables
-
-### Running with Docker Compose
-
-1. Clone this repository
-2. Navigate to the project directory
-3. Set up environment variables (see above)
-4. Run the application:
-
-```bash
-docker-compose up -d
-```
-
-This will:
-- Build the plane-tracker container
-- Start a MongoDB instance
-- Connect the plane-tracker to MongoDB
-- Expose the WebSocket server on port 8765
-
-### Accessing the WebSocket Server
-
-The WebSocket server will be available at:
-
+### Connection
 ```
 ws://localhost:8765
 ```
 
-### Viewing logs
+### Message Types
 
-```bash
-docker-compose logs -f plane-tracker
+#### Outbound (Server → Client)
+```json
+{
+  "type": "aircraft_data",
+  "data": [/* array of aircraft */]
+}
+
+{
+  "type": "aircraft_update", 
+  "data": {/* single aircraft update */}
+}
+
+{
+  "type": "aircraft_removed",
+  "data": {"id": "FLRXXXXXX"}
+}
+
+{
+  "type": "adsb_aircraft_update",
+  "data": {/* ADSB aircraft data */}
+}
 ```
 
-### Stopping the application
-
-```bash
-docker-compose down
-```
-
-## Data Persistence
-
-Data is stored in Docker volumes:
-- `data-volume`: Stores the FLARM database
-- `mongo-data`: Stores MongoDB data 
-- `events-volume`: Stores flight events data
-
-## WebSocket API
-
-The WebSocket server provides the following message types:
-
-- `aircraft_data`: Initial data with all currently tracked aircraft
-- `aircraft_update`: Real-time updates for individual aircraft
-- `aircraft_removed`: Notification when aircraft are no longer being tracked
-- `aircraft_track`: Historical track data in response to track requests
-
-To request historical track data for an aircraft, send:
+#### Inbound (Client → Server)
 ```json
 {
   "type": "track_request",
@@ -200,10 +158,139 @@ To request historical track data for an aircraft, send:
 }
 ```
 
-### For Coolify Deployment
+### Response
+```json
+{
+  "type": "aircraft_track",
+  "data": [/* historical positions */]
+}
+```
 
-When deploying with Coolify:
+## 🚧 Current Limitations & Future Work
 
-1. Create a new service using the Dockerfile
-2. Set the required environment variables in the Coolify dashboard
-3. No need to modify the Dockerfile as environment variables are injected at runtime 
+### Hardcoded Elements
+- **Geographic Region**: Denmark coordinates are hardcoded
+- **Airfield Sources**: Fixed API endpoints
+- **Detection Thresholds**: Flight event detection parameters
+- **Webhook URLs**: Currently hardcoded endpoint
+
+### Known Issues
+- Code cleanup needed in several modules
+- Better error handling required
+- Configuration should be externalized
+- Documentation needs expansion
+
+### Planned Features
+- Configurable geographic regions
+- Multiple country support
+- Advanced launch detection algorithms
+- Enhanced webhook customization
+## 🐳 Docker Deployment
+
+**Important**: This service is designed to run as an **internal backend service**. For a complete deployment including the web frontend, database, and all related services, please visit:
+
+**👉 [SmartGliding Web GitHub Repository](https://github.com/Kevinvincentals/smartgliding-web)**
+
+The web repository contains a complete `docker-compose.yml` that orchestrates all services together.
+
+### Standalone Docker Build
+```bash
+docker build -t smartgliding-ogn-backend .
+docker run -d \
+  --name smartgliding-backend \
+  -p 8765:8765 \
+  -e DATABASE_URL=mongodb://mongo:27017/smartgliding \
+  smartgliding-ogn-backend
+```
+
+## 🔧 Development
+
+### Requirements
+- Python 3.11+
+- MongoDB
+- Internet connection (for OGN and ADSB data)
+
+### Local Setup
+```bash
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env with your configuration
+python main.py
+```
+
+### Cache Management
+The system automatically refreshes caches every 30 minutes:
+- Club aircraft FLARM IDs
+- Registered club homefields
+- All background processes are managed automatically
+
+
+## ⚠️ Important Notes
+
+- **Work in Progress**: This project is under active development
+- **Breaking Changes**: Expect significant changes in future versions
+- **Internal Service**: WebSocket server is designed for internal network use
+- **Security**: No authentication implemented! Local use only
+- **Performance**: Optimized for club scale operations (not national scale)
+
+## 🤝 Contributing
+
+This is an open-source project for SmartGliding. Contributions, issues, and feature requests are welcome!
+
+Feel free to check the [issues page](https://github.com/Kevinvincentals/smartgliding-ogn-backend/issues) if you want to contribute.
+
+## 📄 License
+
+**MIT License** ✅
+
+```
+MIT License
+
+Copyright (c) 2024-2025 Kevin Vincent Als <kevin@connect365.dk>
+SmartGliding - Digital tool for soaring clubs
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Why MIT License?
+
+✅ **Permissions**: Allows reuse, modification, and commercial use with minimal restrictions
+
+✅ **Requirements**: Must include the original license and copyright notice
+
+✅ **Best For**: Projects where you want to maximize adoption and don't care if others use your code in proprietary software
+
+✅ **Perfect For**: Open source projects that want maximum flexibility and adoption
+
+### Usage Rights
+
+- ✅ **Commercial use** - Use for commercial purposes
+- ✅ **Modification** - Modify and create derivative works
+- ✅ **Distribution** - Distribute original or modified versions
+- ✅ **Private use** - Use privately without restrictions
+- ✅ **Patent use** - Grant of patent rights from contributors
+
+### Requirements
+
+- 📋 **License and copyright notice** - Include in all copies or substantial portions
+- 📋 **State changes** - Document significant changes made to the software
+
+---
+
+*Last updated: June 2025* 

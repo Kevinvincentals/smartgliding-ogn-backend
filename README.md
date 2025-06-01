@@ -83,18 +83,6 @@ The system intelligently detects:
 - **Geographic Filtering**: Currently hardcoded for Denmark region
 - **Speed Filtering**: Ignores stationary aircraft
 
-### Performance Optimization
-- **Batch Database Operations**: Efficient bulk inserts/updates
-- **Smart Caching**: 30-minute refresh cycle for all caches
-- **Progress Bars**: Visual feedback during data imports
-- **Background Processing**: Non-blocking cache updates
-
-### Integration Capabilities
-- **WebSocket API**: Real-time data streaming
-- **MongoDB Storage**: Scalable data persistence
-- **Webhook Support**: External system notifications
-- **RESTful Patterns**: Standard data access patterns
-
 ## ⚙️ Configuration
 
 ### Geographic Region (Currently Hardcoded)
@@ -121,8 +109,7 @@ DENMARK_RADIUS_KM = 195
 ## 📡 WebSocket API
 
 ### Connection
-```
-ws://localhost:8765
+```ws://localhost:8765
 ```
 
 ### Message Types
@@ -239,6 +226,10 @@ This is an open-source project for SmartGliding. Contributions, issues, and feat
 
 Feel free to check the [issues page](https://github.com/Kevinvincentals/smartgliding-ogn-backend/issues) if you want to contribute.
 
+## 🙏 Acknowledgments
+
+The OGN implementation in this project is heavily inspired by [IGCD (IGC Downloader Daemon)](https://gitlab.com/lemoidului/igcd) - a flightbook IGC downloader daemon. Special thanks to the IGCD project for providing insights into OGN data processing and flight tracking methodologies.
+
 ## 📄 License
 
 **MIT License** ✅
@@ -267,29 +258,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
-
-### Why MIT License?
-
-✅ **Permissions**: Allows reuse, modification, and commercial use with minimal restrictions
-
-✅ **Requirements**: Must include the original license and copyright notice
-
-✅ **Best For**: Projects where you want to maximize adoption and don't care if others use your code in proprietary software
-
-✅ **Perfect For**: Open source projects that want maximum flexibility and adoption
-
-### Usage Rights
-
-- ✅ **Commercial use** - Use for commercial purposes
-- ✅ **Modification** - Modify and create derivative works
-- ✅ **Distribution** - Distribute original or modified versions
-- ✅ **Private use** - Use privately without restrictions
-- ✅ **Patent use** - Grant of patent rights from contributors
-
-### Requirements
-
-- 📋 **License and copyright notice** - Include in all copies or substantial portions
-- 📋 **State changes** - Document significant changes made to the software
 
 ---
 

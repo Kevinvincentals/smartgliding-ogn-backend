@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-from services.db import store_flight_event, is_registered_homefield
+from services.db import store_flight_event, is_registered_homefield, find_nearest_dk_airfields
 
 # Get logger
 logger = logging.getLogger("plane-tracker")
@@ -54,28 +54,6 @@ aircraft_flight_states = defaultdict(lambda: {
 
 # Store recent takeoffs for tow/winch detection
 recent_takeoffs = []  # List of (aircraft_id, time, position, aircraft_type, model) tuples
-
-# File to store events - use environment variable if available
-# Keeping this for backward compatibility
-EVENTS_FILE = os.environ.get('EVENTS_FILE', 'flight_events.json')
-AIRFIELDS_FILE = os.environ.get('AIRFIELDS_FILE', 'dk_airfields.json')
-
-# Global variable to store the airfields data
-airfields = []
-
-
-def initialize_events_file():
-    """Create or verify the events file exists"""
-    global airfields
-    
-    # Load the airfields data
-    try:
-        with open(AIRFIELDS_FILE, 'r') as f:
-            airfields = json.load(f)
-        logger.info(f"Loaded {len(airfields)} airfields from {AIRFIELDS_FILE}")
-    except Exception as e:
-        logger.error(f"Error loading airfields file: {e}")
-        airfields = []
 
 
 def is_tow_plane(aircraft_type, aircraft_model):
@@ -117,36 +95,31 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 
 
 def find_nearest_airfield(latitude, longitude):
-    """Find the nearest airfield to the given coordinates"""
-    if not airfields:
-        return None
-    
-    nearest_airfield = None
-    min_distance = float('inf')
-    
-    for airfield in airfields:
-        if 'latitude_deg' in airfield and 'longitude_deg' in airfield:
-            airfield_lat = airfield.get('latitude_deg')
-            airfield_lon = airfield.get('longitude_deg')
-            
-            distance = calculate_distance(latitude, longitude, airfield_lat, airfield_lon)
-            
-            if distance < min_distance:
-                min_distance = distance
-                nearest_airfield = {
-                    'name': airfield.get('name'),
-                    'icao': airfield.get('icao'),
-                    'distance': distance  # Store the distance for threshold check
-                }
-    
-    # If the closest airfield is more than 5 km away, return "unknown"
-    if nearest_airfield and nearest_airfield.get('distance', 0) > 5:
+    """Find the nearest airfield to the given coordinates using database"""
+    try:
+        # Query database for nearest airfields within 5km
+        nearest_airfields = find_nearest_dk_airfields(latitude, longitude, max_distance_km=5, limit=1)
+        
+        if nearest_airfields and len(nearest_airfields) > 0:
+            airfield = nearest_airfields[0]
+            return {
+                'name': airfield.get('name'),
+                'icao': airfield.get('icao'),
+                'distance': airfield.get('distance_km', 0)
+            }
+        
+        # If no airfield found within 5km, return "unknown"
         return {
             'name': 'UNKNOWN',
             'icao': 'UNKNOWN'
         }
-    
-    return nearest_airfield
+        
+    except Exception as e:
+        logger.error(f"Error finding nearest airfield: {e}")
+        return {
+            'name': 'UNKNOWN',
+            'icao': 'UNKNOWN'
+        }
 
 
 def send_webhook(event_type, aircraft_id, airfield_icao):
@@ -288,20 +261,17 @@ def detect_launch_type(aircraft_id, aircraft_data, takeoff_time):
             if is_current_glider and is_other_tow:
                 # Update the start type in aircraft_flight_states
                 aircraft_flight_states[aircraft_id]['start_type'] = 'tow'
-                logger.info(f"Detected tow launch for glider {aircraft_id} with tow plane {other_id}")
                 return 'tow', other_id
             
             # If this is a tow plane and other is a glider
             elif is_current_tow and is_other_glider:
                 # Update the start type in aircraft_flight_states
                 aircraft_flight_states[aircraft_id]['start_type'] = 'tow_plane'
-                logger.info(f"Detected tow plane {aircraft_id} launching with glider {other_id}")
                 return 'tow_plane', other_id
     
     # If we found no matching aircraft, it's probably a winch launch for gliders
     if is_current_glider:
         aircraft_flight_states[aircraft_id]['start_type'] = 'winch'
-        logger.info(f"Detected winch launch for glider {aircraft_id}")
         return 'winch', None
     
     return None, None
@@ -397,13 +367,31 @@ def process_flight_events(aircraft_id, aircraft_data):
             # Detect if this was a tow or winch launch
             start_type, paired_with = detect_launch_type(aircraft_id, aircraft_data, takeoff_time)
             
-            # Log a single takeoff event with start type if detected
-            event_type = 'takeoff'
-            logger.info(f"Detected takeoff for aircraft {aircraft_id} at altitude {altitude}m and speed {ground_speed}km/h")
+            # Find the nearest airfield for logging
+            latitude = aircraft_data.get('latitude')
+            longitude = aircraft_data.get('longitude')
+            airfield_info = "unknown location"
+            if latitude is not None and longitude is not None:
+                nearest = find_nearest_airfield(latitude, longitude)
+                if nearest and nearest['name'] != 'UNKNOWN':
+                    airfield_info = nearest['name']
+            
+            # Create descriptive event type for logging
+            if start_type == 'tow':
+                event_description = f"tow takeoff"
+            elif start_type == 'winch':
+                event_description = f"winch takeoff"
+            elif start_type == 'tow_plane':
+                event_description = f"tow plane takeoff"
+            else:
+                event_description = f"takeoff"
+            
+            # Single consolidated log message
+            logger.info(f"Detected {event_description} for aircraft {aircraft_id} at {airfield_info}")
             
             # Log the takeoff event with start type information
             log_event(
-                event_type, 
+                'takeoff', 
                 aircraft_id, 
                 aircraft_data,
                 start_type=start_type,
@@ -423,8 +411,20 @@ def process_flight_events(aircraft_id, aircraft_data):
             state['last_event'] = 'landing'
             state['last_event_time'] = current_time  # Set the cooldown timer
             
+            # Find the nearest airfield for logging
+            latitude = aircraft_data.get('latitude')
+            longitude = aircraft_data.get('longitude')
+            airfield_info = "unknown location"
+            if latitude is not None and longitude is not None:
+                nearest = find_nearest_airfield(latitude, longitude)
+                if nearest and nearest['name'] != 'UNKNOWN':
+                    airfield_info = nearest['name']
+            
             # Get the start type if it was recorded
             start_type = state.get('start_type')
+            
+            # Single consolidated log message
+            logger.info(f"Detected landing for aircraft {aircraft_id} at {airfield_info}")
             
             # Log the landing event with start type if available
             log_event(
@@ -433,7 +433,6 @@ def process_flight_events(aircraft_id, aircraft_data):
                 aircraft_data,
                 start_type=start_type
             )
-            logger.info(f"Detected landing for aircraft {aircraft_id} at altitude {altitude}m and speed {ground_speed}km/h")
             
             # Reset start type for next flight
             if 'start_type' in state:

@@ -232,7 +232,7 @@ async def start_websocket_server():
     queue_task = asyncio.create_task(process_update_queues())
     
     # Set up WebSocket server with cors headers
-    logger.info(f"Starting WebSocket server on ws://{WEBSOCKET_HOST}:{WEBSOCKET_PORT} with CORS support")
+    logger.info(f"🚀 Starting WebSocket server on ws://{WEBSOCKET_HOST}:{WEBSOCKET_PORT} with CORS support")
     async with websockets.serve(
         handle_client, 
         WEBSOCKET_HOST, 
@@ -240,5 +240,5 @@ async def start_websocket_server():
         # Add origins to allow cross-origin connections
         origins=None  # None allows all origins
     ):
-        logger.info(f"WebSocket server started on ws://{WEBSOCKET_HOST}:{WEBSOCKET_PORT}")
+        logger.info(f"✅ WebSocket server started on ws://{WEBSOCKET_HOST}:{WEBSOCKET_PORT}")
         await asyncio.Future()  # Run forever

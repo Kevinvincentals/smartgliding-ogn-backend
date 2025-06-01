@@ -14,13 +14,12 @@ from ogn.parser import parse, ParseError
 from services.config import (
     OGN_USER, COMBINED_FILTER, 
     DENMARK_CENTER_LAT, DENMARK_CENTER_LON, DENMARK_RADIUS_KM,
-    FRANKFURT_CENTER_LAT, FRANKFURT_CENTER_LON, FRANKFURT_RADIUS_KM,
     aircraft_data, club_flarm_ids
 )
 from services.utils import get_aircraft_type_from_symbol, calculate_distance
-from services.db import update_club_planes_cache, find_active_flight, store_aircraft_position
+from services.db import find_active_flight, store_aircraft_position
 from services.flarm_database import get_flarm_info
-from services.flight_events import process_flight_events, initialize_events_file, cleanup_state
+from services.flight_events import process_flight_events, cleanup_state
 
 # Get logger
 logger = logging.getLogger("plane-tracker")
@@ -33,9 +32,6 @@ aircraft_removal_queue = queue.Queue()
 def process_beacon(raw_message):
     """Process OGN beacons and update aircraft data"""
     try:
-        # Check if cache needs updating
-        update_club_planes_cache()
-            
         beacon = parse(raw_message)
         timestamp = beacon.get('timestamp', datetime.now())
         beacon_type = beacon.get('beacon_type', 'Unknown')
@@ -74,20 +70,12 @@ def process_beacon(raw_message):
                 logger.warning(f"Invalid coordinates for aircraft {aircraft_id}: lat={lat}, lon={lon}")
                 return
             
-            # Calculate distance from both centers to identify which area this aircraft belongs to
+            # Calculate distance from Denmark center
             dist_from_denmark = calculate_distance(lat, lon, DENMARK_CENTER_LAT, DENMARK_CENTER_LON)
-            dist_from_frankfurt = calculate_distance(lat, lon, FRANKFURT_CENTER_LAT, FRANKFURT_CENTER_LON)
             
-            # Determine which region this aircraft belongs to
+            # Determine if aircraft is in Denmark radius
             in_denmark_radius = dist_from_denmark <= DENMARK_RADIUS_KM
-            in_frankfurt_radius = dist_from_frankfurt <= FRANKFURT_RADIUS_KM
-            region = "Unknown"
-            if in_denmark_radius and in_frankfurt_radius:
-                region = "Both Denmark and Frankfurt"
-            elif in_denmark_radius:
-                region = "Denmark"
-            elif in_frankfurt_radius:
-                region = "Frankfurt"
+            region = "Denmark" if in_denmark_radius else "Outside Denmark"
             
             # Get FLARM info
             flarm_info = get_flarm_info(aircraft_id) if aircraft_id else None
@@ -210,10 +198,7 @@ def periodically_cleanup_state():
 def start_ogn_client():
     """Start the OGN client in a separate thread"""
     client = AprsClient(aprs_user=OGN_USER, aprs_filter=COMBINED_FILTER)
-    logger.info(f"Starting OGN client with combined filter:")
-    logger.info(f"  - Denmark: Center({DENMARK_CENTER_LAT}, {DENMARK_CENTER_LON}), Radius: {DENMARK_RADIUS_KM}km")
-    logger.info(f"  - Frankfurt: Center({FRANKFURT_CENTER_LAT}, {FRANKFURT_CENTER_LON}), Radius: {FRANKFURT_RADIUS_KM}km")
-    logger.info(f"  - Full filter: {COMBINED_FILTER}")
+    logger.info(f"✅ Starting OGN client - Denmark: Center({DENMARK_CENTER_LAT}, {DENMARK_CENTER_LON}), Radius: {DENMARK_RADIUS_KM}km")
     try:
         client.connect()
         client.run(callback=process_beacon, autoreconnect=True)
@@ -252,9 +237,6 @@ def cleanup_aircraft_data():
 
 def start_ogn_threads():
     """Start OGN client and cleanup threads"""
-    # Initialize the flight events file
-    initialize_events_file()
-    
     # Start the OGN client thread
     ogn_thread = threading.Thread(target=start_ogn_client)
     ogn_thread.daemon = True

@@ -12,7 +12,6 @@ import signal
 import sys
 
 from services.db import init_database, close_database_connection
-from services.flarm_database import download_flarm_database, save_flarm_database
 from services.ogn_client import start_ogn_threads
 from services.adsb_client import start_adsb_client, stop_adsb_client
 from services.websocket_server import start_websocket_server
@@ -38,15 +37,10 @@ def signal_handler(sig, frame):
 async def main():
     """Main entry point"""
     try:
-        # Test MongoDB connection
+        # Test MongoDB connection and initialize all databases (airfields, OGN database, etc.)
         if not init_database():
             logger.error("Failed to initialize database connections")
             return
-            
-        # Download/load FLARM database
-        if not download_flarm_database():
-            logger.warning("Could not load FLARM database, proceeding without it")
-            save_flarm_database("")  # Create empty file
         
         # Start the OGN client threads
         ogn_thread, cleanup_thread = start_ogn_threads()

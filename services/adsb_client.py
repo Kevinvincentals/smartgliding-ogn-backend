@@ -210,9 +210,9 @@ class AdsbClient:
                     has_clients = client_count > 0
                     
                     if has_clients and not last_had_clients:
-                        logger.info(f"ADSB client resuming data fetching - {client_count} clients connected")
+                        logger.info(f"📡 ADSB client resuming data fetching - {client_count} clients connected")
                     elif not has_clients and last_had_clients:
-                        logger.info("ADSB client pausing data fetching - no clients connected")
+                        logger.info("⏸️ ADSB client pausing data fetching - no clients connected")
                         self.clear_aircraft_data()
                 
                 last_had_clients = has_clients
@@ -273,12 +273,12 @@ class AdsbClient:
     def start(self):
         """Start the ADSB client"""
         self.running = True
-        logger.info("Starting ADSB client...")
+        logger.info("🚀 Starting ADSB client...")
     
     def stop(self):
         """Stop the ADSB client"""
         self.running = False
-        logger.info("Stopping ADSB client...")
+        logger.info("🛑 Stopping ADSB client...")
 
 
 # Global ADSB client instance
@@ -293,7 +293,7 @@ def start_adsb_client():
     
     thread = threading.Thread(target=run_client, daemon=True)
     thread.start()
-    logger.info("ADSB client thread started")
+    logger.info("✅ ADSB client thread started")
     return thread
 
 
@@ -306,4 +306,4 @@ def set_client_count_callback(callback_func):
     """Set the callback function to get connected client count"""
     global get_connected_clients_count
     get_connected_clients_count = callback_func
-    logger.info("ADSB client callback for client count set") 
+    logger.info("✅ ADSB client callback configured") 

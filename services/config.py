@@ -25,20 +25,7 @@ CLUBS_COLLECTION_NAME = "clubs"
 DENMARK_CENTER_LAT = 55.923624
 DENMARK_CENTER_LON = 9.755859
 DENMARK_RADIUS_KM = 195
-DENMARK_FILTER = f"r/{DENMARK_CENTER_LAT}/{DENMARK_CENTER_LON}/{DENMARK_RADIUS_KM}"
-
-# Frankfurt configuration (currently not active)
-FRANKFURT_CENTER_LAT = 50.110980
-FRANKFURT_CENTER_LON = 8.664145
-FRANKFURT_RADIUS_KM = 120
-FRANKFURT_FILTER = f"r/{FRANKFURT_CENTER_LAT}/{FRANKFURT_CENTER_LON}/{FRANKFURT_RADIUS_KM}"
-
-# Only tracking Denmark region for now
-COMBINED_FILTER = DENMARK_FILTER
-
-# FLARM database settings
-FLARM_DB_URL = "https://ddb.glidernet.org/download/"
-FLARM_DB_FILE = "flarm-database.csv"
+COMBINED_FILTER = f"r/{DENMARK_CENTER_LAT}/{DENMARK_CENTER_LON}/{DENMARK_RADIUS_KM}"
 
 # WebSocket server settings
 WEBSOCKET_HOST = "0.0.0.0"
@@ -49,7 +36,6 @@ CACHE_UPDATE_INTERVAL = 30 * 60  # 30 minutes in seconds
 AIRCRAFT_REMOVAL_TIMEOUT = 600  # 10 minutes in seconds
 
 # Global state
-flarm_db = {}  # Store FLARM device information
 club_flarm_ids = set()  # Store club planes' FLARM IDs for filtering
 last_planes_cache_update = datetime(1970, 1, 1)  # Initialize with old time to force first update
 aircraft_data = {}  # Store the latest data for each aircraft

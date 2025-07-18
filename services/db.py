@@ -181,9 +181,23 @@ def fetch_and_update_dk_airfields():
         
         # Create index for efficient lookups (only if collection has data)
         if created_count > 0 or updated_count > 0:
-            dk_airfields_collection.create_index("ident", unique=True)
-            dk_airfields_collection.create_index("icao")
-            dk_airfields_collection.create_index([("latitude_deg", 1), ("longitude_deg", 1)])
+            try:
+                dk_airfields_collection.create_index("ident", unique=True)
+            except pymongo.errors.OperationFailure as e:
+                if e.code != 85:  # Only raise if not IndexOptionsConflict
+                    raise
+            
+            try:
+                dk_airfields_collection.create_index("icao")
+            except pymongo.errors.OperationFailure as e:
+                if e.code != 85:
+                    raise
+            
+            try:
+                dk_airfields_collection.create_index([("latitude_deg", 1), ("longitude_deg", 1)])
+            except pymongo.errors.OperationFailure as e:
+                if e.code != 85:
+                    raise
         
         # Consolidated final message with checkmark
         total_changes = created_count + updated_count
@@ -347,19 +361,34 @@ def init_database():
         mongo_client.admin.command('ping')
         logger.info("✅ Connected to MongoDB")
         
-        # Create index for efficient queries matching the Prisma schema's index
-        flarm_collection.create_index([
-            ("aircraft_id", pymongo.ASCENDING), 
-            ("mongodb_timestamp", pymongo.DESCENDING)
-        ])
+        # Create indexes with error handling for existing indexes
+        try:
+            # Create index for efficient queries matching the Prisma schema's index
+            # The Prisma schema has this index: @@index([aircraft_id, mongodb_timestamp(sort: Desc)])
+            flarm_collection.create_index([
+                ("aircraft_id", pymongo.ASCENDING), 
+                ("mongodb_timestamp", pymongo.DESCENDING)
+            ], name="flarm_data_aircraft_id_mongodb_timestamp_idx")
+        except pymongo.errors.OperationFailure as e:
+            if e.code == 85:  # IndexOptionsConflict
+                logger.debug("Index already exists on flarm_data collection, skipping creation")
+            else:
+                raise
         
-        # Create index for flight events
-        flight_events_collection.create_index([
-            ("id", pymongo.ASCENDING),
-            ("timestamp", pymongo.DESCENDING),
-            ("type", pymongo.ASCENDING)
-        ])
-        logger.info("✅ Database indexes created")
+        try:
+            # Create index for flight events
+            flight_events_collection.create_index([
+                ("id", pymongo.ASCENDING),
+                ("timestamp", pymongo.DESCENDING),
+                ("type", pymongo.ASCENDING)
+            ])
+        except pymongo.errors.OperationFailure as e:
+            if e.code == 85:  # IndexOptionsConflict
+                logger.debug("Index already exists on flight_events collection, skipping creation")
+            else:
+                raise
+                
+        logger.info("✅ Database indexes verified")
         
         # Initialize club planes cache
         update_club_planes_cache()

@@ -249,6 +249,17 @@ class AdsbClient:
                                 if flight == 'TWR':
                                     continue  # Skip TWR aircraft
                                 
+                                # Filter out stationary aircraft (ground speed < 5 knots)
+                                ground_speed = normalized.get('ground_speed')
+                                if ground_speed is not None:
+                                    try:
+                                        speed_knots = float(ground_speed)
+                                        if speed_knots < 5:
+                                            continue  # Skip stationary aircraft
+                                    except (ValueError, TypeError):
+                                        # If we can't parse ground speed, include the aircraft
+                                        pass
+                                
                                 current_aircraft[normalized['aircraft_id']] = normalized
                         
                         # Find new/updated aircraft

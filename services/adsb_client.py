@@ -235,8 +235,20 @@ class AdsbClient:
                             if normalized and normalized.get('aircraft_id'):
                                 # Filter out aircraft above 5000 feet
                                 altitude = normalized.get('altitude')
-                                if altitude is not None and altitude > 5000:
-                                    continue  # Skip this aircraft
+                                if altitude is not None:
+                                    try:
+                                        altitude_ft = float(altitude)
+                                        if altitude_ft > 5000:
+                                            continue  # Skip this aircraft
+                                    except (ValueError, TypeError):
+                                        # If we can't parse altitude, include the aircraft
+                                        pass
+                                
+                                # Filter out TWR (tower) aircraft
+                                flight = normalized.get('flight', '').strip()
+                                if flight == 'TWR':
+                                    continue  # Skip TWR aircraft
+                                
                                 current_aircraft[normalized['aircraft_id']] = normalized
                         
                         # Find new/updated aircraft

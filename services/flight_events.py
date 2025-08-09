@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-from services.db import store_flight_event, is_registered_homefield, find_nearest_dk_airfields
+from services.db import store_flight_event, is_registered_homefield, find_nearest_dk_airfields, update_flight_winch_altitude
 
 # Get logger
 logger = logging.getLogger("plane-tracker")
@@ -272,6 +272,18 @@ def detect_launch_type(aircraft_id, aircraft_data, takeoff_time):
     # If we found no matching aircraft, it's probably a winch launch for gliders
     if is_current_glider:
         aircraft_flight_states[aircraft_id]['start_type'] = 'winch'
+        # Only track winch launches for club aircraft
+        from services.config import club_flarm_ids
+        clean_flarm_id = aircraft_id
+        if clean_flarm_id and clean_flarm_id.startswith('FLR'):
+            clean_flarm_id = clean_flarm_id[3:]
+        
+        if clean_flarm_id in club_flarm_ids:
+            # Import winch tracking here to avoid circular import
+            from services.winch_detector import start_winch_tracking
+            # Get current altitude from aircraft data
+            current_altitude = aircraft_data.get('altitude', 0)
+            start_winch_tracking(aircraft_id, current_altitude)
         return 'winch', None
     
     return None, None

@@ -8,7 +8,7 @@ import pymongo
 import requests
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 from services.config import (
@@ -430,17 +430,37 @@ def update_club_planes_cache():
         if (current_time - last_planes_cache_update).total_seconds() <= CACHE_UPDATE_INTERVAL:
             return False  # Cache is still valid
             
-        # Fetch all planes that have a flarm_id
-        planes = planes_collection.find({"flarm_id": {"$exists": True, "$ne": ""}})
+        # Calculate 3 days ago for guest aircraft filtering (date only)
+        three_days_ago = (current_time - timedelta(days=3)).replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Fetch all planes that have a flarm_id and are either:
+        # 1. Not guest aircraft (club aircraft)
+        # 2. Guest aircraft created within the last 3 days
+        planes = planes_collection.find({
+            "flarm_id": {"$exists": True, "$ne": ""},
+            "$or": [
+                {"is_guest": {"$ne": True}},  # Club aircraft
+                {
+                    "is_guest": True,
+                    "createdAt": {"$gte": three_days_ago}  # Active guest aircraft
+                }
+            ]
+        })
         
         # Extract and normalize FLARM IDs
         new_flarm_ids = set()
+        plane_details = []  # Store for logging
         count = 0
         
         for plane in planes:
             if "flarm_id" in plane and plane["flarm_id"]:
                 flarm_id = plane["flarm_id"].upper()  # Normalize to uppercase
+                # Get registration and model from database fields
+                registration = plane.get("registration_id", "Unknown")
+                model = plane.get("type", "Unknown")
+                is_guest = plane.get("is_guest", False)
                 new_flarm_ids.add(flarm_id)
+                plane_details.append((registration, model, flarm_id, is_guest))
                 count += 1
         
         # Check for changes
@@ -479,6 +499,30 @@ def find_active_flight(flarm_id):
     except Exception as e:
         logger.error(f"Error finding active flight for {flarm_id}: {e}")
         return None
+
+
+def update_flight_winch_altitude(flight_logbook_id, winch_altitude):
+    """Update flight with winch launch altitude"""
+    try:
+        from bson import ObjectId
+        
+        result = flight_logbook_collection.update_one(
+            {"_id": ObjectId(flight_logbook_id)},
+            {
+                "$set": {
+                    "winch_launch_altitude": winch_altitude,
+                    "updatedAt": datetime.now()
+                }
+            }
+        )
+        
+        if result.modified_count > 0:
+            logger.info(f"Updated flight {flight_logbook_id} with winch altitude: {winch_altitude}m")
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Error updating flight with winch altitude: {e}")
+        return False
 
 
 def store_aircraft_position(aircraft_info):

@@ -17,9 +17,11 @@ from services.config import (
     aircraft_data, club_flarm_ids
 )
 from services.utils import get_aircraft_type_from_symbol, calculate_distance
-from services.db import find_active_flight, store_aircraft_position
+from services.db import find_active_flight, store_aircraft_position, update_flight_winch_altitude
 from services.flarm_database import get_flarm_info
 from services.flight_events import process_flight_events, cleanup_state
+from services.variometer_tracker import update_variometer, cleanup_old_data as cleanup_variometer_data
+from services.winch_detector import start_winch_tracking, update_winch_tracking, cleanup_old_winch_data
 
 # Get logger
 logger = logging.getLogger("plane-tracker")
@@ -115,6 +117,11 @@ def process_beacon(raw_message):
             climb_rate = beacon.get('climb_rate', 0)
             climb_rate = float(climb_rate) if climb_rate is not None else 0.0
             
+            # Only track variometer for club aircraft that we store in DB
+            variometer_averages = None
+            if store_in_mongodb:
+                variometer_averages = update_variometer(aircraft_id, climb_rate)
+            
             # Prepare aircraft data for websocket updates
             aircraft_data[aircraft_id] = {
                 'id': aircraft_id,
@@ -133,8 +140,24 @@ def process_beacon(raw_message):
                 'last_seen': datetime.now().isoformat()
             }
             
+            # Add variometer averages only for club aircraft
+            if variometer_averages is not None:
+                aircraft_data[aircraft_id]['climb_rate_30s_avg'] = variometer_averages['climb_rate_30s_avg']
+                aircraft_data[aircraft_id]['climb_rate_60s_avg'] = variometer_averages['climb_rate_60s_avg']
+            
             # Process flight events (detect takeoffs and landings)
             process_flight_events(aircraft_id, aircraft_data[aircraft_id])
+            
+            # Check for winch launch tracking (only for club aircraft)
+            if store_in_mongodb:
+                winch_data = update_winch_tracking(aircraft_id, alt, climb_rate)
+                if winch_data:
+                    # Update the flight in database with winch altitude
+                    flight_logbook_id = find_active_flight(clean_flarm_id)
+                    if flight_logbook_id:
+                        update_flight_winch_altitude(flight_logbook_id, winch_data['winch_launch_altitude'])
+                        # Add winch data to websocket update
+                        aircraft_data[aircraft_id]['winch_launch_altitude'] = winch_data['winch_launch_altitude']
             
             # Only store in MongoDB if it's a club aircraft and ground speed is above 10 km/h
             if store_in_mongodb and ground_speed > 10:
@@ -161,6 +184,11 @@ def process_beacon(raw_message):
                     'registration': registration,
                     'aircraft_type': aircraft_type,
                 }
+                
+                # Add variometer averages to database storage
+                if variometer_averages:
+                    mongodb_data['climb_rate_30s_avg'] = variometer_averages['climb_rate_30s_avg']
+                    mongodb_data['climb_rate_60s_avg'] = variometer_averages['climb_rate_60s_avg']
                 
                 # Only add flight_logbook_id if there's an active flight
                 if flight_logbook_id:
@@ -228,6 +256,10 @@ def cleanup_aircraft_data():
                 del aircraft_data[aircraft_id]
                 # Queue the removal for the WebSocket server
                 aircraft_removal_queue.put(removed_data)
+            
+            # Also cleanup variometer and winch data
+            cleanup_variometer_data()
+            cleanup_old_winch_data()
             
             time.sleep(60)  # Run cleanup every minute
         except Exception as e:

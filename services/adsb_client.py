@@ -233,6 +233,10 @@ class AdsbClient:
                         for aircraft in aircraft_list:
                             normalized = self.normalize_aircraft_data(aircraft)
                             if normalized and normalized.get('aircraft_id'):
+                                # Filter out aircraft above 5000 feet
+                                altitude = normalized.get('altitude')
+                                if altitude is not None and altitude > 5000:
+                                    continue  # Skip this aircraft
                                 current_aircraft[normalized['aircraft_id']] = normalized
                         
                         # Find new/updated aircraft

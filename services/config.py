@@ -28,8 +28,8 @@ DENMARK_RADIUS_KM = 195
 COMBINED_FILTER = f"r/{DENMARK_CENTER_LAT}/{DENMARK_CENTER_LON}/{DENMARK_RADIUS_KM}"
 
 # WebSocket server settings
-WEBSOCKET_HOST = "0.0.0.0"
-WEBSOCKET_PORT = 8765
+WEBSOCKET_HOST = os.getenv("WEBSOCKET_HOST", "0.0.0.0")
+WEBSOCKET_PORT = int(os.getenv("WEBSOCKET_PORT", "8765"))
 
 # Club planes caching settings
 CACHE_UPDATE_INTERVAL = 30 * 60  # 30 minutes in seconds

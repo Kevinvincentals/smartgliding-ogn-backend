@@ -27,6 +27,18 @@ def get_connected_clients_count():
     return len(connected_clients)
 
 
+def get_adsb_clients_count():
+    """Get the number of clients that need ADSB data (full plane-tracker subscribers)"""
+    # Count clients that want all aircraft data (like live map),
+    # but not clients doing lightweight tracking
+    count = 0
+    for client in connected_clients:
+        if hasattr(client, 'wants_all_adsb') and client.wants_all_adsb:
+            count += 1
+    logger.debug(f"ADSB client count check: {count} clients want ADSB")
+    return count
+
+
 async def broadcast_aircraft_update(aircraft_info):
     """Send aircraft update to all connected clients"""
     if not connected_clients:
@@ -265,6 +277,13 @@ async def handle_client(websocket):
                         'type': 'unsubscription_confirmed',
                         'aircraft_ids': aircraft_ids
                     }))
+
+                # Handle ADSB preference from Next.js proxy
+                elif message_type == 'client_wants_adsb':
+                    wants_adsb = data.get('wants_adsb', False)
+                    websocket.wants_all_adsb = wants_adsb
+                    logger.info(f"Client {client_info} ADSB preference set to: {wants_adsb}")
+                    logger.info(f"Total ADSB clients now: {get_adsb_clients_count()}")
             except json.JSONDecodeError:
                 logger.warning(f"Received non-JSON message from client")
             except Exception as e:
@@ -327,8 +346,8 @@ async def process_update_queues():
 
 async def start_websocket_server():
     """Start the WebSocket server"""
-    # Set up the ADSB client callback to check connected clients
-    set_client_count_callback(get_connected_clients_count)
+    # Set up the ADSB client callback to check for clients that need ADSB data
+    set_client_count_callback(get_adsb_clients_count)
     
     # Start the queue processing task
     queue_task = asyncio.create_task(process_update_queues())

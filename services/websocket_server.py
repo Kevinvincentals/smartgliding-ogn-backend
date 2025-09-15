@@ -29,16 +29,55 @@ def get_connected_clients_count():
 
 async def broadcast_aircraft_update(aircraft_info):
     """Send aircraft update to all connected clients"""
-    if connected_clients:
-        # Use the custom encoder for datetime objects
-        message = json.dumps({
-            'type': 'aircraft_update',
-            'data': aircraft_info
+    if not connected_clients:
+        return
+
+    aircraft_id = aircraft_info.get('id')
+
+    # Check if any client is tracking this specific aircraft
+    has_tracked_clients = any(
+        hasattr(client, 'tracked_aircraft') and aircraft_id in client.tracked_aircraft
+        for client in connected_clients
+    )
+
+    tasks = []
+
+    # Only send updates for aircraft that someone is actually tracking
+    if has_tracked_clients and aircraft_id:
+        # Extract only essential data for lightweight tracking
+        lightweight_data = {
+            'id': aircraft_id,
+            'latitude': aircraft_info.get('latitude'),
+            'longitude': aircraft_info.get('longitude'),
+            'altitude': aircraft_info.get('altitude'),
+            'ground_speed': aircraft_info.get('ground_speed'),
+            'track': aircraft_info.get('track'),
+            'climb_rate': aircraft_info.get('climb_rate'),
+            'timestamp': aircraft_info.get('timestamp')
+        }
+        tracked_message = json.dumps({
+            'type': 'tracked_aircraft_update',
+            'data': lightweight_data
         }, cls=DateTimeEncoder)
-        await asyncio.gather(
-            *[client.send(message) for client in connected_clients],
-            return_exceptions=True
-        )
+
+        # Send only to clients tracking this specific aircraft
+        for client in connected_clients:
+            if hasattr(client, 'tracked_aircraft') and aircraft_id in client.tracked_aircraft:
+                tasks.append(client.send(tracked_message))
+
+    # Only send full OGN updates to clients that explicitly want them
+    full_message = json.dumps({
+        'type': 'aircraft_update',
+        'data': aircraft_info
+    }, cls=DateTimeEncoder)
+
+    for client in connected_clients:
+        # Only send full aircraft updates if the client has explicitly subscribed to general tracking
+        if hasattr(client, 'wants_all_aircraft') and client.wants_all_aircraft:
+            tasks.append(client.send(full_message))
+
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def broadcast_aircraft_removed(removed_info):
@@ -56,16 +95,57 @@ async def broadcast_aircraft_removed(removed_info):
 
 async def broadcast_adsb_aircraft_update(aircraft_info):
     """Send ADSB aircraft update to all connected clients"""
-    if connected_clients:
-        # Use the custom encoder for datetime objects
-        message = json.dumps({
-            'type': 'adsb_aircraft_update',
-            'data': aircraft_info
+    if not connected_clients:
+        return
+
+    aircraft_id = aircraft_info.get('aircraft_id') or aircraft_info.get('id')
+
+    # Check if any client is tracking this specific aircraft
+    has_tracked_clients = any(
+        hasattr(client, 'tracked_aircraft') and aircraft_id in client.tracked_aircraft
+        for client in connected_clients
+    )
+
+    tasks = []
+
+    # Only send updates for aircraft that someone is actually tracking
+    if has_tracked_clients and aircraft_id:
+        # Extract only essential data for lightweight tracking
+        lightweight_data = {
+            'id': aircraft_id,
+            'latitude': aircraft_info.get('latitude'),
+            'longitude': aircraft_info.get('longitude'),
+            'altitude': aircraft_info.get('altitude'),
+            'ground_speed': aircraft_info.get('ground_speed'),
+            'track': aircraft_info.get('track'),
+            'vertical_rate': aircraft_info.get('vertical_rate'),
+            'timestamp': aircraft_info.get('timestamp')
+        }
+        tracked_message = json.dumps({
+            'type': 'tracked_aircraft_update',
+            'data': lightweight_data
         }, cls=DateTimeEncoder)
-        await asyncio.gather(
-            *[client.send(message) for client in connected_clients],
-            return_exceptions=True
-        )
+
+        # Send only to clients tracking this specific aircraft
+        for client in connected_clients:
+            if hasattr(client, 'tracked_aircraft') and aircraft_id in client.tracked_aircraft:
+                tasks.append(client.send(tracked_message))
+
+    # Only send full ADSB updates to clients that explicitly want them
+    # (Don't send to clients that haven't made any subscription requests)
+    full_message = json.dumps({
+        'type': 'adsb_aircraft_update',
+        'data': aircraft_info
+    }, cls=DateTimeEncoder)
+
+    for client in connected_clients:
+        # Only send full ADSB updates if the client has explicitly subscribed to general tracking
+        # Don't send to clients that are just connecting or haven't made subscription requests
+        if hasattr(client, 'wants_all_adsb') and client.wants_all_adsb:
+            tasks.append(client.send(full_message))
+
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def broadcast_adsb_aircraft_removed(removed_info):
@@ -92,7 +172,6 @@ async def send_heartbeat(websocket):
             try:
                 # Check if the connection is still open by sending a message
                 await websocket.send("Connected to plane tracker")
-                logger.debug(f"Sent heartbeat to {client_info}")
                 await asyncio.sleep(5)
             except websockets.exceptions.ConnectionClosed:
                 logger.info(f"Client {client_info} no longer connected, stopping heartbeat")
@@ -108,15 +187,17 @@ async def send_heartbeat(websocket):
 async def handle_client(websocket):
     """Handle WebSocket client connection"""
     global connected_clients
-    
+
     # Log the remote address
     client_ip = websocket.remote_address[0] if websocket.remote_address else "unknown"
     client_port = websocket.remote_address[1] if websocket.remote_address else 0
     client_info = f"{client_ip}:{client_port}"
     logger.info(f"New client connected: {client_info}")
-    
-    # Register client
+
+    # Register client with tracking info
     connected_clients.add(websocket)
+    # Store tracked aircraft IDs for this client
+    websocket.tracked_aircraft = set()
     
     try:
         # Send current aircraft data (OGN data)
@@ -125,34 +206,25 @@ async def handle_client(websocket):
                 'type': 'aircraft_data',
                 'data': list(aircraft_data.values())
             }, cls=DateTimeEncoder)  # Use custom encoder
-            logger.info(f"Sending initial OGN aircraft data to {client_info}: {len(aircraft_data)} aircraft")
             await websocket.send(message)
-        else:
-            logger.info(f"No OGN aircraft data to send to {client_info}")
-        
+
         # Send current ADSB aircraft data
         if adsb_aircraft_data:
             adsb_message = json.dumps({
                 'type': 'adsb_aircraft_data',
                 'data': list(adsb_aircraft_data.values())
             }, cls=DateTimeEncoder)
-            logger.info(f"Sending initial ADSB aircraft data to {client_info}: {len(adsb_aircraft_data)} aircraft")
             await websocket.send(adsb_message)
-        else:
-            logger.info(f"No ADSB aircraft data to send to {client_info}")
-        
         # Start heartbeat
         heartbeat_task = asyncio.create_task(send_heartbeat(websocket))
-        
+
         # Keep connection open and handle messages
         async for message in websocket:
-            logger.info(f"Received message from {client_info}: {message[:100]}")
-            
             # Try to parse JSON messages
             try:
                 data = json.loads(message)
                 message_type = data.get('type')
-                
+
                 # Handle track request
                 if message_type == 'track_request':
                     aircraft_id = data.get('aircraft_id')
@@ -163,6 +235,36 @@ async def handle_client(websocket):
                             'data': track_data
                         }, cls=DateTimeEncoder)  # Use custom encoder
                         await websocket.send(track_message)
+
+                # Handle lightweight tracking subscription
+                elif message_type == 'subscribe_aircraft':
+                    aircraft_ids = data.get('aircraft_ids', [])
+                    if isinstance(aircraft_ids, str):
+                        aircraft_ids = [aircraft_ids]
+                    for aircraft_id in aircraft_ids:
+                        websocket.tracked_aircraft.add(aircraft_id)
+                        # Send current data for this aircraft if available
+                        if aircraft_id in aircraft_data:
+                            await websocket.send(json.dumps({
+                                'type': 'tracked_aircraft_update',
+                                'data': aircraft_data[aircraft_id]
+                            }, cls=DateTimeEncoder))
+                    await websocket.send(json.dumps({
+                        'type': 'subscription_confirmed',
+                        'aircraft_ids': list(websocket.tracked_aircraft)
+                    }))
+
+                # Handle unsubscribe from aircraft
+                elif message_type == 'unsubscribe_aircraft':
+                    aircraft_ids = data.get('aircraft_ids', [])
+                    if isinstance(aircraft_ids, str):
+                        aircraft_ids = [aircraft_ids]
+                    for aircraft_id in aircraft_ids:
+                        websocket.tracked_aircraft.discard(aircraft_id)
+                    await websocket.send(json.dumps({
+                        'type': 'unsubscription_confirmed',
+                        'aircraft_ids': aircraft_ids
+                    }))
             except json.JSONDecodeError:
                 logger.warning(f"Received non-JSON message from client")
             except Exception as e:
@@ -232,7 +334,7 @@ async def start_websocket_server():
     queue_task = asyncio.create_task(process_update_queues())
     
     # Set up WebSocket server with cors headers
-    logger.info(f"🚀 Starting WebSocket server on ws://{WEBSOCKET_HOST}:{WEBSOCKET_PORT} with CORS support")
+    logger.info(f"Starting WebSocket server on ws://{WEBSOCKET_HOST}:{WEBSOCKET_PORT}")
     async with websockets.serve(
         handle_client, 
         WEBSOCKET_HOST, 
@@ -240,5 +342,5 @@ async def start_websocket_server():
         # Add origins to allow cross-origin connections
         origins=None  # None allows all origins
     ):
-        logger.info(f"✅ WebSocket server started on ws://{WEBSOCKET_HOST}:{WEBSOCKET_PORT}")
+        logger.info(f"WebSocket server started successfully")
         await asyncio.Future()  # Run forever

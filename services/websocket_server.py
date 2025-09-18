@@ -278,6 +278,15 @@ async def handle_client(websocket):
                         'aircraft_ids': aircraft_ids
                     }))
 
+                # Handle subscription to all aircraft updates
+                elif message_type == 'subscribe_all':
+                    websocket.wants_all_aircraft = True
+                    logger.info(f"Client {client_info} subscribed to all aircraft updates")
+                    await websocket.send(json.dumps({
+                        'type': 'subscription_confirmed',
+                        'message': 'Subscribed to all aircraft updates'
+                    }))
+
                 # Handle ADSB preference from Next.js proxy
                 elif message_type == 'client_wants_adsb':
                     wants_adsb = data.get('wants_adsb', False)

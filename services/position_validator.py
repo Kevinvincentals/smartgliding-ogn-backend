@@ -32,11 +32,40 @@ last_valid_positions: Dict[str, Dict] = {}
 # Store suspicious aircraft IDs
 suspicious_aircraft: Dict[str, int] = {}  # Count of suspicious events
 
+# Blacklist for aircraft with impossible movements (1 hour expiry)
+aircraft_blacklist: Dict[str, datetime] = {}  # aircraft_id -> blacklist_expiry_timestamp
+
+# Blacklist duration in seconds (1 hour)
+BLACKLIST_DURATION = 3600
+
+
+def is_blacklisted(aircraft_id: str) -> bool:
+    """Check if an aircraft is currently blacklisted"""
+    if aircraft_id not in aircraft_blacklist:
+        return False
+
+    # Check if blacklist has expired
+    now = datetime.now()
+    if now >= aircraft_blacklist[aircraft_id]:
+        # Blacklist expired, remove from blacklist
+        del aircraft_blacklist[aircraft_id]
+        logger.info(f"Aircraft {aircraft_id} removed from blacklist (expired)")
+        return False
+
+    return True
+
+
+def add_to_blacklist(aircraft_id: str, reason: str):
+    """Add an aircraft to the blacklist for 1 hour"""
+    expiry_time = datetime.now() + timedelta(seconds=BLACKLIST_DURATION)
+    aircraft_blacklist[aircraft_id] = expiry_time
+    logger.warning(f"Aircraft {aircraft_id} added to blacklist until {expiry_time.strftime('%H:%M:%S')} - {reason}")
+
 
 def get_max_speed_for_type(aircraft_type: str) -> float:
     """Get maximum speed for aircraft type"""
     aircraft_type_lower = (aircraft_type or 'default').lower()
-    
+
     if 'glider' in aircraft_type_lower or 'sailplane' in aircraft_type_lower:
         return MAX_SPEEDS['glider']
     elif 'tow' in aircraft_type_lower or 'tug' in aircraft_type_lower:
@@ -45,7 +74,7 @@ def get_max_speed_for_type(aircraft_type: str) -> float:
         return MAX_SPEEDS['helicopter']
     elif 'powered' in aircraft_type_lower or 'motor' in aircraft_type_lower:
         return MAX_SPEEDS['powered']
-    
+
     return MAX_SPEEDS['default']
 
 
@@ -110,10 +139,11 @@ def validate_position(
             reason = (f"Impossible speed: {speed_kmh:.1f} km/h "
                      f"(traveled {distance_km:.2f} km in {time_diff:.1f}s, "
                      f"max for {aircraft_type}: {max_speed} km/h)")
-            
-            # If this aircraft has been suspicious multiple times, reject it
+
+            # If this aircraft has been suspicious multiple times, blacklist it
             if suspicious_aircraft[aircraft_id] > 3:
-                logger.warning(f"Aircraft {aircraft_id} rejected - {reason}")
+                add_to_blacklist(aircraft_id, reason)
+                logger.warning(f"Aircraft {aircraft_id} rejected and blacklisted - {reason}")
                 return False, reason
             else:
                 logger.info(f"Aircraft {aircraft_id} suspicious movement - {reason}")
@@ -127,20 +157,22 @@ def validate_position(
             if abs(alt_change) > MAX_ALTITUDE_JUMP and time_diff <= 1:
                 reason = f"Impossible altitude jump: {alt_change:.1f}m in {time_diff:.1f}s"
                 suspicious_aircraft[aircraft_id] = suspicious_aircraft.get(aircraft_id, 0) + 1
-                
+
                 if suspicious_aircraft[aircraft_id] > 3:
-                    logger.warning(f"Aircraft {aircraft_id} rejected - {reason}")
+                    add_to_blacklist(aircraft_id, reason)
+                    logger.warning(f"Aircraft {aircraft_id} rejected and blacklisted - {reason}")
                     return False, reason
                 else:
                     logger.info(f"Aircraft {aircraft_id} suspicious altitude - {reason}")
-            
+
             # Check climb/descent rates
             if alt_change_rate > MAX_CLIMB_RATE or alt_change_rate < MAX_DESCENT_RATE:
                 reason = f"Impossible climb/descent rate: {alt_change_rate:.1f} m/s"
                 suspicious_aircraft[aircraft_id] = suspicious_aircraft.get(aircraft_id, 0) + 1
-                
+
                 if suspicious_aircraft[aircraft_id] > 3:
-                    logger.warning(f"Aircraft {aircraft_id} rejected - {reason}")
+                    add_to_blacklist(aircraft_id, reason)
+                    logger.warning(f"Aircraft {aircraft_id} rejected and blacklisted - {reason}")
                     return False, reason
                 else:
                     logger.info(f"Aircraft {aircraft_id} suspicious climb rate - {reason}")
@@ -167,19 +199,31 @@ def validate_position(
 
 
 def cleanup_old_positions():
-    """Remove old position data for aircraft not seen recently"""
+    """Remove old position data for aircraft not seen recently and expired blacklist entries"""
     now = datetime.now()
     cutoff_time = now - timedelta(minutes=10)
-    
+
     to_remove = []
     for aircraft_id, data in last_valid_positions.items():
         if data['timestamp'] < cutoff_time:
             to_remove.append(aircraft_id)
-    
+
     for aircraft_id in to_remove:
         del last_valid_positions[aircraft_id]
         if aircraft_id in suspicious_aircraft:
             del suspicious_aircraft[aircraft_id]
-    
+
     if to_remove:
         logger.info(f"Cleaned up {len(to_remove)} old aircraft positions")
+
+    # Clean up expired blacklist entries
+    expired_blacklist = []
+    for aircraft_id, expiry_time in aircraft_blacklist.items():
+        if now >= expiry_time:
+            expired_blacklist.append(aircraft_id)
+
+    for aircraft_id in expired_blacklist:
+        del aircraft_blacklist[aircraft_id]
+
+    if expired_blacklist:
+        logger.info(f"Removed {len(expired_blacklist)} expired blacklist entries")

@@ -64,6 +64,10 @@ def add_to_blacklist(aircraft_id: str, reason: str):
 
 def get_max_speed_for_type(aircraft_type: str) -> float:
     """Get maximum speed for aircraft type"""
+    # Handle non-string types (sometimes aircraft_type is an int from OGN parser)
+    if not isinstance(aircraft_type, str):
+        return MAX_SPEEDS['default']
+
     aircraft_type_lower = (aircraft_type or 'default').lower()
 
     if 'glider' in aircraft_type_lower or 'sailplane' in aircraft_type_lower:

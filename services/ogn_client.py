@@ -22,6 +22,7 @@ from services.flarm_database import get_flarm_info
 from services.flight_events import process_flight_events, cleanup_state
 from services.variometer_tracker import update_variometer, cleanup_old_data as cleanup_variometer_data
 from services.winch_detector import start_winch_tracking, update_winch_tracking, cleanup_old_winch_data
+from services.position_validator import validate_position, cleanup_old_positions
 
 # Get logger
 logger = logging.getLogger("plane-tracker")
@@ -70,6 +71,23 @@ def process_beacon(raw_message):
             
             if not (isinstance(lat, (int, float)) and isinstance(lon, (int, float))):
                 logger.warning(f"Invalid coordinates for aircraft {aircraft_id}: lat={lat}, lon={lon}")
+                return
+            
+            # Validate position for impossible movements
+            is_valid, validation_reason = validate_position(
+                aircraft_id=aircraft_id,
+                lat=lat,
+                lon=lon,
+                alt=alt,
+                timestamp=timestamp,
+                aircraft_type=beacon.get('aircraft_type', 'default'),
+                ground_speed=beacon.get('ground_speed', 0) / 1.852 if beacon.get('ground_speed') else None,
+                climb_rate=beacon.get('climb_rate')
+            )
+            
+            if not is_valid:
+                logger.warning(f"Position validation failed for {aircraft_id}: {validation_reason}")
+                logger.info(f"{aircraft_id} @ {lat},{lon} alt={alt}m heard_by={beacon.get('receiver_name', 'unknown')} ts={timestamp}")
                 return
             
             # Calculate distance from Denmark center
@@ -257,9 +275,10 @@ def cleanup_aircraft_data():
                 # Queue the removal for the WebSocket server
                 aircraft_removal_queue.put(removed_data)
             
-            # Also cleanup variometer and winch data
+            # Also cleanup variometer, winch data, and position validator data
             cleanup_variometer_data()
             cleanup_old_winch_data()
+            cleanup_old_positions()
             
             time.sleep(60)  # Run cleanup every minute
         except Exception as e:

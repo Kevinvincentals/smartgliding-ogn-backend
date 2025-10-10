@@ -29,6 +29,9 @@ MAX_ALTITUDE_JUMP = 100
 # Maximum distance between consecutive packets (km) - typically packets come every few seconds
 MAX_PACKET_DISTANCE = 20
 
+# Maximum altitude for any aircraft (meters) - commercial jets fly at ~13km, military ~25km
+MAX_ALTITUDE = 15000  # 15km should cover all civilian aircraft
+
 # Store last known valid positions for each aircraft
 last_valid_positions: Dict[str, Dict] = {}
 
@@ -107,7 +110,19 @@ def validate_position(
         return False, f"Invalid latitude: {lat}"
     if not (-180 <= lon <= 180):
         return False, f"Invalid longitude: {lon}"
-    
+
+    # Check for impossible altitude (aircraft in space!)
+    if alt is not None and alt > MAX_ALTITUDE:
+        suspicious_aircraft[aircraft_id] = suspicious_aircraft.get(aircraft_id, 0) + 1
+        reason = f"Impossible altitude: {alt:.0f}m (max: {MAX_ALTITUDE}m)"
+
+        if suspicious_aircraft[aircraft_id] > 1:
+            add_to_blacklist(aircraft_id, reason)
+            logger.warning(f"Aircraft {aircraft_id} rejected and blacklisted - {reason}")
+            return False, reason
+        else:
+            logger.info(f"Aircraft {aircraft_id} suspicious altitude - {reason}")
+
     # Check if we have a previous position for this aircraft
     if aircraft_id in last_valid_positions:
         last_pos = last_valid_positions[aircraft_id]

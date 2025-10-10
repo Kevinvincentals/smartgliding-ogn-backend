@@ -26,6 +26,9 @@ MAX_DESCENT_RATE = -50  # 50 m/s descent rate (emergency descent)
 # Maximum altitude jump in 1 second (meters)
 MAX_ALTITUDE_JUMP = 100
 
+# Maximum distance between consecutive packets (km) - typically packets come every few seconds
+MAX_PACKET_DISTANCE = 20
+
 # Store last known valid positions for each aircraft
 last_valid_positions: Dict[str, Dict] = {}
 
@@ -130,10 +133,24 @@ def validate_position(
         
         # Calculate distance traveled
         distance_km = calculate_distance(lat, lon, last_lat, last_lon)
-        
+
+        # Check if distance between packets is suspiciously large (>20 km jump in <60 seconds)
+        # Only check if packets are recent (within 1 minute) to avoid false positives for long gaps
+        if distance_km > MAX_PACKET_DISTANCE and time_diff < 60:
+            suspicious_aircraft[aircraft_id] = suspicious_aircraft.get(aircraft_id, 0) + 1
+            reason = (f"Suspicious position jump: {distance_km:.1f} km between packets "
+                     f"(in {time_diff:.1f}s)")
+
+            if suspicious_aircraft[aircraft_id] > 1:
+                add_to_blacklist(aircraft_id, reason)
+                logger.warning(f"Aircraft {aircraft_id} rejected and blacklisted - {reason}")
+                return False, reason
+            else:
+                logger.info(f"Aircraft {aircraft_id} suspicious position jump - {reason}")
+
         # Calculate speed
         speed_kmh = (distance_km / time_diff) * 3600 if time_diff > 0 else 0
-        
+
         # Get max speed for this aircraft type
         max_speed = get_max_speed_for_type(aircraft_type)
         
@@ -145,7 +162,7 @@ def validate_position(
                      f"max for {aircraft_type}: {max_speed} km/h)")
 
             # If this aircraft has been suspicious multiple times, blacklist it
-            if suspicious_aircraft[aircraft_id] > 3:
+            if suspicious_aircraft[aircraft_id] > 1:
                 add_to_blacklist(aircraft_id, reason)
                 logger.warning(f"Aircraft {aircraft_id} rejected and blacklisted - {reason}")
                 return False, reason

@@ -22,7 +22,7 @@ from services.flarm_database import get_flarm_info
 from services.flight_events import process_flight_events, cleanup_state
 from services.variometer_tracker import update_variometer, cleanup_old_data as cleanup_variometer_data
 from services.winch_detector import start_winch_tracking, update_winch_tracking, cleanup_old_winch_data
-from services.position_validator import validate_position, cleanup_old_positions
+from services.position_validator import validate_position, cleanup_old_positions, is_blacklisted
 
 # Get logger
 logger = logging.getLogger("plane-tracker")
@@ -53,7 +53,17 @@ def process_beacon(raw_message):
                 aircraft_id = beacon['name']
             else:
                 return  # Skip if no identifier
-            
+
+            # Check if aircraft is blacklisted - skip all processing and remove from tracking
+            if is_blacklisted(aircraft_id):
+                # Remove from aircraft_data if present
+                if aircraft_id in aircraft_data:
+                    removed_data = {'id': aircraft_id, 'action': 'removed'}
+                    del aircraft_data[aircraft_id]
+                    aircraft_removal_queue.put(removed_data)
+                    logger.info(f"Removed blacklisted aircraft {aircraft_id} from tracking")
+                return
+
             # Extract clean FLARM ID for filtering
             clean_flarm_id = aircraft_id
             if clean_flarm_id and clean_flarm_id.startswith('FLR'):

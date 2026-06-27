@@ -319,17 +319,23 @@ def update_registered_homefields_cache():
         if (current_time - last_homefields_cache_update).total_seconds() <= CACHE_UPDATE_INTERVAL:
             return registered_homefields
             
-        # Fetch all active clubs with homefields
-        clubs = clubs_collection.find({
-            "status": "active",
-            "homefield": {"$exists": True, "$ne": ""}
-        })
-        
-        # Extract homefields
+        # Fetch all active clubs, including the airfields they're allowed to operate at.
+        clubs = clubs_collection.find(
+            {"status": "active"},
+            {"homefield": 1, "allowed_airfields": 1}
+        )
+
+        # Track the union of each club's home field and its additional allowed airfields,
+        # so away-camps (e.g. EPZP) added to allowed_airfields get tracked without losing
+        # the club's primary homefield.
         new_homefields = set()
         for club in clubs:
-            if "homefield" in club and club["homefield"]:
-                new_homefields.add(club["homefield"])
+            homefield = club.get("homefield")
+            if homefield:
+                new_homefields.add(homefield)
+            for airfield in club.get("allowed_airfields") or []:
+                if airfield:
+                    new_homefields.add(airfield)
         
         # Check for changes
         is_initialization = last_homefields_cache_update == datetime(1970, 1, 1)
@@ -353,6 +359,37 @@ def update_registered_homefields_cache():
 def is_registered_homefield(icao):
     """Check if an ICAO code is a registered club homefield"""
     return icao in registered_homefields
+
+def build_aprs_filter():
+    """Build the APRS-IS range filter covering Denmark plus every registered club airfield.
+
+    Starts from the Denmark base clause (COMBINED_FILTER) and appends one
+    r/<lat>/<lon>/PER_AIRFIELD_RADIUS_KM clause for each registered airfield (home +
+    allowed) whose coordinates are known in dk_airfields. APRS-IS OR's space-separated
+    range filters, so away-fields outside Denmark (e.g. EPZP in Poland) start receiving
+    beacons. Relies on registered_homefields being populated first
+    (update_registered_homefields_cache() runs during init_database()).
+    """
+    from services.config import COMBINED_FILTER, PER_AIRFIELD_RADIUS_KM
+
+    clauses = [COMBINED_FILTER]  # Denmark base, always present
+    for icao in sorted(registered_homefields):
+        airfield = dk_airfields_collection.find_one(
+            {"icao": icao},
+            {"latitude_deg": 1, "longitude_deg": 1}
+        )
+        if not airfield:
+            logger.warning(f"No dk_airfields entry for registered airfield {icao}; "
+                           f"it will not be added to the APRS filter.")
+            continue
+        lat = airfield.get("latitude_deg")
+        lon = airfield.get("longitude_deg")
+        if lat is None or lon is None:
+            logger.warning(f"Airfield {icao} has no coordinates; skipping APRS filter clause.")
+            continue
+        clauses.append(f"r/{lat}/{lon}/{PER_AIRFIELD_RADIUS_KM}")
+
+    return " ".join(clauses)
 
 def init_database():
     """Initialize database connections and indexes"""

@@ -25,7 +25,14 @@ CLUBS_COLLECTION_NAME = "clubs"
 DENMARK_CENTER_LAT = 55.923624
 DENMARK_CENTER_LON = 9.755859
 DENMARK_RADIUS_KM = 195
+# Base APRS-IS range filter covering Denmark. The live filter is built at runtime by
+# services.db.build_aprs_filter(), which appends one r/<lat>/<lon>/<radius> clause per
+# registered club airfield (home + allowed) so away-fields outside Denmark get tracked too.
 COMBINED_FILTER = f"r/{DENMARK_CENTER_LAT}/{DENMARK_CENTER_LON}/{DENMARK_RADIUS_KM}"
+
+# Radius (km) emitted per registered airfield when building the dynamic APRS filter.
+# Covers local soaring / circuits around an away-field; raise it for longer cross-country.
+PER_AIRFIELD_RADIUS_KM = 80
 
 # WebSocket server settings
 WEBSOCKET_HOST = os.getenv("WEBSOCKET_HOST", "0.0.0.0")

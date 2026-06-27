@@ -17,7 +17,7 @@ from services.config import (
     aircraft_data, club_flarm_ids
 )
 from services.utils import get_aircraft_type_from_symbol, calculate_distance
-from services.db import find_active_flight, store_aircraft_position, update_flight_winch_altitude
+from services.db import find_active_flight, store_aircraft_position, update_flight_winch_altitude, build_aprs_filter
 from services.flarm_database import get_flarm_info
 from services.flight_events import process_flight_events, cleanup_state
 from services.variometer_tracker import update_variometer, cleanup_old_data as cleanup_variometer_data
@@ -243,8 +243,16 @@ def periodically_cleanup_state():
 
 def start_ogn_client():
     """Start the OGN client in a separate thread"""
-    client = AprsClient(aprs_user=OGN_USER, aprs_filter=COMBINED_FILTER)
-    logger.info(f"✅ Starting OGN client - Denmark: Center({DENMARK_CENTER_LAT}, {DENMARK_CENTER_LON}), Radius: {DENMARK_RADIUS_KM}km")
+    # Build the filter from registered club airfields (Denmark base + one clause per
+    # home/allowed airfield) so away-fields such as EPZP get tracked. Falls back to the
+    # Denmark base clause if the dynamic build fails for any reason.
+    try:
+        aprs_filter = build_aprs_filter()
+    except Exception as e:
+        logger.error(f"Failed to build dynamic APRS filter, falling back to Denmark base: {e}")
+        aprs_filter = COMBINED_FILTER
+    client = AprsClient(aprs_user=OGN_USER, aprs_filter=aprs_filter)
+    logger.info(f"✅ Starting OGN client with APRS filter: {aprs_filter}")
     try:
         client.connect()
         client.run(callback=process_beacon, autoreconnect=True)

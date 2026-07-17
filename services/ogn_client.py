@@ -12,11 +12,11 @@ from ogn.client import AprsClient
 from ogn.parser import parse, ParseError
 
 from services.config import (
-    OGN_USER, COMBINED_FILTER, 
+    OGN_USER, COMBINED_FILTER,
     DENMARK_CENTER_LAT, DENMARK_CENTER_LON, DENMARK_RADIUS_KM,
-    aircraft_data, club_flarm_ids
+    aircraft_data, club_flarm_ids, ground_vehicles
 )
-from services.utils import get_aircraft_type_from_symbol, calculate_distance
+from services.utils import get_aircraft_type_from_symbol, calculate_distance, normalize_ogn_id
 from services.db import find_active_flight, store_aircraft_position, update_flight_winch_altitude, build_aprs_filter
 from services.flarm_database import get_flarm_info
 from services.flight_events import process_flight_events, cleanup_state
@@ -69,9 +69,13 @@ def process_beacon(raw_message):
             if clean_flarm_id and clean_flarm_id.startswith('FLR'):
                 clean_flarm_id = clean_flarm_id[3:]
             
+            # Registered ground vehicles (winch, retrieve car, ...) are broadcast to
+            # WebSocket clients but excluded from flight logic and persistence.
+            vehicle = ground_vehicles.get(normalize_ogn_id(aircraft_id))
+
             # Track all aircraft for WebSocket clients, but only store club planes in MongoDB
             store_in_mongodb = False
-            if clean_flarm_id in club_flarm_ids:
+            if clean_flarm_id in club_flarm_ids and not vehicle:
                 store_in_mongodb = True
             
             # Basic validation of coordinates
@@ -121,6 +125,11 @@ def process_beacon(raw_message):
             
             # Extract aircraft type from APRS symbols in the raw message
             aircraft_type = get_aircraft_type_from_symbol(raw_message)
+
+            if vehicle:
+                aircraft_type = "Ground vehicle"
+                aircraft_model = "Ground vehicle"
+                registration = vehicle["name"]
             
             # Extract heading and speed from raw message if available
             raw_heading = None
@@ -172,9 +181,16 @@ def process_beacon(raw_message):
             if variometer_averages is not None:
                 aircraft_data[aircraft_id]['climb_rate_30s_avg'] = variometer_averages['climb_rate_30s_avg']
                 aircraft_data[aircraft_id]['climb_rate_60s_avg'] = variometer_averages['climb_rate_60s_avg']
-            
-            # Process flight events (detect takeoffs and landings)
-            process_flight_events(aircraft_id, aircraft_data[aircraft_id])
+
+            if vehicle:
+                aircraft_data[aircraft_id]['is_ground_vehicle'] = True
+                aircraft_data[aircraft_id]['vehicle_icon'] = vehicle['icon']
+
+            # Process flight events (detect takeoffs and landings). Ground vehicles are
+            # excluded: the takeoff threshold uses MSL altitude, so a car doing 30+ km/h
+            # would otherwise fire false takeoff/landing events and webhooks.
+            if not vehicle:
+                process_flight_events(aircraft_id, aircraft_data[aircraft_id])
             
             # Check for winch launch tracking (only for club aircraft)
             if store_in_mongodb:

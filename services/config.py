@@ -20,6 +20,7 @@ FLARM_COLLECTION_NAME = "flarm_data"
 PLANES_COLLECTION_NAME = "planes"
 FLIGHT_LOGBOOK_COLLECTION_NAME = "flight_logbook"
 CLUBS_COLLECTION_NAME = "clubs"
+GROUND_VEHICLES_COLLECTION_NAME = "ground_vehicles"
 
 # Denmark configuration
 DENMARK_CENTER_LAT = 55.923624
@@ -46,6 +47,7 @@ AIRCRAFT_REMOVAL_TIMEOUT = 600  # 10 minutes in seconds
 club_flarm_ids = set()  # Store club planes' FLARM IDs for filtering
 last_planes_cache_update = datetime(1970, 1, 1)  # Initialize with old time to force first update
 aircraft_data = {}  # Store the latest data for each aircraft
+ground_vehicles = {}  # normalized OGN ID -> {"name", "icon", "club_id"} for registered ground vehicles
 
 # OGN client settings
 OGN_USER = "N0CALL"

@@ -15,6 +15,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger("plane-tracker")
 
+
+def normalize_ogn_id(aircraft_id):
+    """Normalize an OGN/FLARM device ID for comparison: strip the tracker-type
+    prefix (FLR/OGN/ICA) and uppercase, so 'OGN3E5C12', 'FLR3E5C12' and '3e5c12'
+    all map to '3E5C12'."""
+    if not aircraft_id:
+        return ""
+    return re.sub(r'^(FLR|OGN|ICA)', '', aircraft_id.strip().upper())
+
+
 # APRS symbols to aircraft type mapping
 APRS_AIRCRAFT_TYPES = {
     "/z": "Unknown",

@@ -12,15 +12,18 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 from services.config import (
-    DATABASE_URL, 
-    FLARM_COLLECTION_NAME, 
-    PLANES_COLLECTION_NAME, 
+    DATABASE_URL,
+    FLARM_COLLECTION_NAME,
+    PLANES_COLLECTION_NAME,
     FLIGHT_LOGBOOK_COLLECTION_NAME,
     CLUBS_COLLECTION_NAME,
-    club_flarm_ids, 
-    last_planes_cache_update, 
+    GROUND_VEHICLES_COLLECTION_NAME,
+    club_flarm_ids,
+    ground_vehicles,
+    last_planes_cache_update,
     CACHE_UPDATE_INTERVAL
 )
+from services.utils import normalize_ogn_id
 
 # Get logger
 logger = logging.getLogger("plane-tracker")
@@ -41,10 +44,14 @@ flight_logbook_collection = db[FLIGHT_LOGBOOK_COLLECTION_NAME]
 flight_events_collection = db["flight_events"]  # New collection for flight events
 clubs_collection = db[CLUBS_COLLECTION_NAME]  # Add clubs collection
 dk_airfields_collection = db["dk_airfields"]  # Collection for Danish airfields
+ground_vehicles_collection = db[GROUND_VEHICLES_COLLECTION_NAME]  # Club ground vehicles (winch, retrieve car, ...)
 
 # Cache for registered homefields
 registered_homefields = set()
 last_homefields_cache_update = datetime(1970, 1, 1)
+
+# Cache freshness for ground vehicles (the cache itself lives in config.ground_vehicles)
+last_vehicles_cache_update = datetime(1970, 1, 1)
 
 def _print_airfields_progress_bar(current, total, prefix="Airfields", suffix="", length=30, created=0, updated=0, unchanged=0):
     """Print a progress bar with statistics for airfields"""
@@ -430,7 +437,11 @@ def init_database():
         # Initialize club planes cache
         update_club_planes_cache()
         logger.info(f"✅ Loaded {len(club_flarm_ids)} club planes")
-        
+
+        # Initialize ground vehicles cache
+        update_ground_vehicles_cache()
+        logger.info(f"✅ Loaded {len(ground_vehicles)} ground vehicles")
+
         # Initialize registered homefields cache
         update_registered_homefields_cache()
         logger.info(f"✅ Loaded {len(registered_homefields)} registered homefields")
@@ -517,6 +528,53 @@ def update_club_planes_cache():
         return True
     except Exception as e:
         logger.error(f"Error updating club planes cache: {e}")
+        return False
+
+
+def update_ground_vehicles_cache():
+    """Fetch registered ground vehicles from MongoDB and update the cache.
+
+    The cache maps normalized OGN device IDs to vehicle info and is used to tag
+    broadcasts and to exclude vehicles from flight-event detection."""
+    global last_vehicles_cache_update
+
+    try:
+        # Check if cache needs updating
+        current_time = datetime.now()
+        if (current_time - last_vehicles_cache_update).total_seconds() <= CACHE_UPDATE_INTERVAL:
+            return False  # Cache is still valid
+
+        vehicles = ground_vehicles_collection.find({
+            "ogn_id": {"$exists": True, "$ne": ""}
+        })
+
+        new_vehicles = {}
+        for vehicle in vehicles:
+            ogn_id = normalize_ogn_id(vehicle.get("ogn_id", ""))
+            if not ogn_id:
+                continue
+            new_vehicles[ogn_id] = {
+                "name": vehicle.get("name", "Vehicle"),
+                "icon": vehicle.get("icon", "car"),
+                "club_id": str(vehicle.get("clubId", ""))
+            }
+
+        # Check for changes
+        is_initialization = last_vehicles_cache_update == datetime(1970, 1, 1)
+        changes_detected = ground_vehicles != new_vehicles
+
+        # Mutate in place so importing modules see updates
+        ground_vehicles.clear()
+        ground_vehicles.update(new_vehicles)
+        last_vehicles_cache_update = current_time
+
+        if changes_detected and not is_initialization:
+            logger.info(f"✅ Updated ground vehicles cache: {len(new_vehicles)} vehicles")
+        else:
+            logger.debug(f"Updated ground vehicles cache: {len(new_vehicles)} vehicles")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating ground vehicles cache: {e}")
         return False
 
 
@@ -679,12 +737,15 @@ def refresh_all_caches():
         
         # Refresh club planes cache
         club_planes_updated = update_club_planes_cache()
-        
+
+        # Refresh ground vehicles cache
+        vehicles_updated = update_ground_vehicles_cache()
+
         # Refresh registered homefields cache
         homefields_updated = update_registered_homefields_cache()
-        
+
         # Log summary
-        if club_planes_updated or homefields_updated:
+        if club_planes_updated or homefields_updated or vehicles_updated:
             logger.debug("✅ Cache refresh completed")
         else:
             logger.debug("✅ Cache refresh completed (no updates needed)")

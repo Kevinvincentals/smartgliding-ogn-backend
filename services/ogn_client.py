@@ -38,24 +38,32 @@ def process_beacon(raw_message):
         beacon = parse(raw_message)
         timestamp = beacon.get('timestamp', datetime.now())
         beacon_type = beacon.get('beacon_type', 'Unknown')
-        
-        # Only process aircraft beacons
-        if beacon_type in ['aprs_aircraft', 'flarm', 'tracker']:
+
+        # Get aircraft ID (needed early to recognize registered ground vehicles)
+        aircraft_id = None
+        if 'address' in beacon:
+            aircraft_id = beacon['address']
+        elif 'name' in beacon:
+            aircraft_id = beacon['name']
+
+        # Registered ground vehicles (winch, retrieve car, ...) are broadcast to
+        # WebSocket clients but excluded from flight logic and persistence.
+        vehicle = ground_vehicles.get(normalize_ogn_id(aircraft_id)) if aircraft_id else None
+
+        # Only process aircraft beacons — but always accept beacons from registered
+        # ground vehicles, whose trackers may parse as other beacon types
+        if beacon_type in ['aprs_aircraft', 'flarm', 'tracker'] or vehicle:
             # Skip beacons without position data
             if 'latitude' not in beacon or 'longitude' not in beacon:
                 return
-                
-            # Get aircraft ID
-            aircraft_id = None
-            if 'address' in beacon:
-                aircraft_id = beacon['address']
-            elif 'name' in beacon:
-                aircraft_id = beacon['name']
-            else:
+
+            if not aircraft_id:
                 return  # Skip if no identifier
 
-            # Check if aircraft is blacklisted - skip all processing and remove from tracking
-            if is_blacklisted(aircraft_id):
+            # Check if aircraft is blacklisted - skip all processing and remove from tracking.
+            # Ground vehicles are exempt: GPS drift while parked (e.g. in a hangar) can
+            # trip the impossible-movement detector and would hide the vehicle for an hour.
+            if not vehicle and is_blacklisted(aircraft_id):
                 # Remove from aircraft_data if present
                 if aircraft_id in aircraft_data:
                     removed_data = {'id': aircraft_id, 'action': 'removed'}
@@ -68,10 +76,6 @@ def process_beacon(raw_message):
             clean_flarm_id = aircraft_id
             if clean_flarm_id and clean_flarm_id.startswith('FLR'):
                 clean_flarm_id = clean_flarm_id[3:]
-            
-            # Registered ground vehicles (winch, retrieve car, ...) are broadcast to
-            # WebSocket clients but excluded from flight logic and persistence.
-            vehicle = ground_vehicles.get(normalize_ogn_id(aircraft_id))
 
             # Track all aircraft for WebSocket clients, but only store club planes in MongoDB
             store_in_mongodb = False
@@ -87,22 +91,25 @@ def process_beacon(raw_message):
                 logger.warning(f"Invalid coordinates for aircraft {aircraft_id}: lat={lat}, lon={lon}")
                 return
             
-            # Validate position for impossible movements
-            is_valid, validation_reason = validate_position(
-                aircraft_id=aircraft_id,
-                lat=lat,
-                lon=lon,
-                alt=alt,
-                timestamp=timestamp,
-                aircraft_type=beacon.get('aircraft_type', 'default'),
-                ground_speed=beacon.get('ground_speed', 0) / 1.852 if beacon.get('ground_speed') else None,
-                climb_rate=beacon.get('climb_rate')
-            )
-            
-            if not is_valid:
-                logger.warning(f"Position validation failed for {aircraft_id}: {validation_reason}")
-                logger.info(f"{aircraft_id} @ {lat},{lon} alt={alt}m heard_by={beacon.get('receiver_name', 'unknown')} ts={timestamp}")
-                return
+            # Validate position for impossible movements. Skipped for ground vehicles:
+            # the validator is tuned for aircraft and stationary GPS drift (e.g. parked
+            # in a hangar) can fail it repeatedly, hiding the vehicle from the map.
+            if not vehicle:
+                is_valid, validation_reason = validate_position(
+                    aircraft_id=aircraft_id,
+                    lat=lat,
+                    lon=lon,
+                    alt=alt,
+                    timestamp=timestamp,
+                    aircraft_type=beacon.get('aircraft_type', 'default'),
+                    ground_speed=beacon.get('ground_speed', 0) / 1.852 if beacon.get('ground_speed') else None,
+                    climb_rate=beacon.get('climb_rate')
+                )
+
+                if not is_valid:
+                    logger.warning(f"Position validation failed for {aircraft_id}: {validation_reason}")
+                    logger.info(f"{aircraft_id} @ {lat},{lon} alt={alt}m heard_by={beacon.get('receiver_name', 'unknown')} ts={timestamp}")
+                    return
             
             # Calculate distance from Denmark center
             dist_from_denmark = calculate_distance(lat, lon, DENMARK_CENTER_LAT, DENMARK_CENTER_LON)

@@ -181,6 +181,7 @@ def process_beacon(raw_message):
                 'registration': registration,
                 'aircraft_type': aircraft_type,
                 'region': region,
+                'receiver': beacon.get('receiver_name'),  # OGN ground station that heard this beacon
                 'last_seen': datetime.now().isoformat()
             }
             
